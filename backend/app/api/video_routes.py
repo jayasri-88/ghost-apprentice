@@ -2,14 +2,14 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
+
+from app.core.config import CHUNK_SIZE, MAX_UPLOAD_BYTES, UPLOAD_DIR
+from app.services import manual_store
 
 router = APIRouter()
 
-UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
-CHUNK_SIZE = 1024 * 1024
 
 ALLOWED_TYPES = {
     "video/mp4",
@@ -38,7 +38,7 @@ async def upload_video(file: UploadFile = File(...)):
         with open(file_path, "wb") as buffer:
             while chunk := await file.read(CHUNK_SIZE):
                 total_size += len(chunk)
-                if total_size > MAX_FILE_SIZE:
+                if total_size > MAX_UPLOAD_BYTES:
                     raise HTTPException(
                         status_code=413, detail="Video exceeds 100 MB limit"
                     )
@@ -49,6 +49,8 @@ async def upload_video(file: UploadFile = File(...)):
     finally:
         await file.close()
 
+    manual_store.add_video(video_id, file.filename, file_path, total_size)
+
     return {
         "message": "Video uploaded successfully",
         "video_id": video_id,
@@ -56,3 +58,15 @@ async def upload_video(file: UploadFile = File(...)):
         "size_bytes": total_size,
         "status": "uploaded",
     }
+
+
+@router.get("/{video_id}/file")
+def get_video_file(video_id: str):
+    if not video_id.replace("-", "").isalnum():
+        raise HTTPException(status_code=400, detail="Invalid video id")
+
+    matches = list(UPLOAD_DIR.glob(f"{video_id}.*"))
+    if not matches:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    return FileResponse(matches[0], content_disposition_type="inline")

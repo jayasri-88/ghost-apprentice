@@ -1,6 +1,7 @@
 export const STATUS = {
   approved: { label: "Approved", pill: "bg-good-soft text-good border-good/30" },
   pending: { label: "Pending Review", pill: "bg-warn-soft text-warn border-warn/30" },
+  pending_expert_review: { label: "Pending Review", pill: "bg-warn-soft text-warn border-warn/30" },
   rejected: { label: "Rejected", pill: "bg-bad-soft text-bad border-bad/30" },
 };
 

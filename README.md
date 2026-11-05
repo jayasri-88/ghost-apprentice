@@ -64,20 +64,46 @@ assistant to work; the rest of the UI runs on the bundled sample data.
 
 ## API
 
-| Method | Path                  | Purpose                                   |
-| ------ | --------------------- | ----------------------------------------- |
-| POST   | /api/videos/upload    | Store a recording (mp4/webm/mov/avi, 100 MB max) |
-| POST   | /api/assistant/chat   | Ask the assistant; body: `{question, manual_context}` |
-| GET    | /health               | Liveness check                            |
+| Method | Path                        | Purpose                                   |
+| ------ | --------------------------- | ----------------------------------------- |
+| POST   | /api/videos/upload          | Store a recording (mp4/webm/mov/avi, 100 MB max) |
+| POST   | /api/manuals/analyze        | Queue video-to-manual analysis `{video_id}` |
+| GET    | /api/manuals/analyze/{id}   | Poll analysis progress `{stage, percent, message, error}` |
+| GET    | /api/manuals                | List generated manuals                    |
+| GET    | /api/manuals/{id}           | One manual                                |
+| GET    | /api/videos/{id}/file       | Stream the original recording for playback |
+| POST   | /api/assistant/chat         | Ask the assistant; body: `{question, manual_context}` |
+| GET    | /health                     | Liveness check                            |
+
+## Video-to-manual pipeline
+
+Upload → "Generate knowledge manual" runs fully locally:
+
+1. OpenCV samples up to `MAX_FRAMES_PER_VIDEO` representative frames (near
+   duplicates dropped); mov files fall back to the bundled ffmpeg transcoder.
+2. Narration is transcribed locally with Faster-Whisper (`base`, int8, CPU)
+   when the video has an audio track.
+3. Frames go to qwen3-vl:2b through Ollama in small batches sized for 4 GB
+   VRAM; each batch reports only what is visible.
+4. The manual is assembled deterministically from those observations —
+   steps, tools, components and safety warnings are unions of what the model
+   actually saw. The model only words the title/summary/equipment. Anything
+   not evidenced is listed under missing information, never invented.
+5. Saved to SQLite (`ghost_apprentice.db`) as `pending_expert_review`; the
+   Knowledge Manuals page lists and opens them.
+
+Expect several minutes per recording on a laptop GPU (tune via
+`FRAME_BATCH_SIZE` / `MAX_FRAMES_PER_VIDEO` in `backend/.env`). Analysis
+runs in a background task; progress shows in the Upload page.
 
 The assistant answers only from the manual context it is given. If the
 information is not in the manual, it is instructed to say so.
 
 ## Current state
 
-- Manual data lives in `frontend/src/data/manuals.js` as realistic samples.
-  The pages read from that one module by design — swapping it for API calls
-  is the intended next step once the database exists.
-- Uploaded videos are stored on disk under `backend/uploads/` (not tracked
-  by git).
-- Voice input and the `/manuals` API are not built yet.
+- The Assistant page still grounds on the bundled sample manuals; wiring it
+  to generate `manual_context` from stored (generated) manuals is the next
+  step — the API already returns the same shape.
+- Uploaded videos and generated manuals persist in `backend/uploads/` and
+  `ghost_apprentice.db` (both gitignored).
+- Voice input and an expert sign-off UI are not built yet.

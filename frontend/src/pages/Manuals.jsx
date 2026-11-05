@@ -1,15 +1,15 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search, BookOpen, CheckCircle, Clock, ListChecks } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import ManualCard from "../components/ManualCard";
 import ManualDetail from "../components/ManualDetail";
 import StatCard from "../components/StatCard";
-import manuals from "../data/manuals";
+import sampleManuals from "../data/manuals";
+import { fetchManuals } from "../services/api";
 import { FILTERS } from "../data/manualStatus";
 
-// Swap this import for an API call when the backend exposes /api/manuals.
-// Everything below derives from the array, so the page needs no other change.
+const isPending = (m) => m.status === "pending" || m.status === "pending_expert_review";
 
 const statsFor = (list) => [
   { title: "Total Manuals", value: list.length, description: "In the knowledge library", icon: BookOpen },
@@ -21,7 +21,7 @@ const statsFor = (list) => [
   },
   {
     title: "Pending Review",
-    value: list.filter((m) => m.status === "pending").length,
+    value: list.filter(isPending).length,
     description: "Waiting on a technician sign-off",
     icon: Clock,
   },
@@ -38,26 +38,55 @@ export default function Manuals() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const [selected, setSelected] = useState(null);
+  const [manuals, setManuals] = useState(null);
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchManuals()
+      .then((list) => {
+        if (!cancelled) setManuals(list);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLoadError("Could not reach the backend at http://localhost:8000.");
+          setManuals([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const loading = manuals === null;
+  // Fall back to the bundled sample library only while the API is unreachable,
+  // so the page is never blank during a backend restart.
+  const library = !loading && manuals.length === 0 && loadError ? sampleManuals : manuals;
 
   const visible = useMemo(() => {
+    if (!library) return [];
     const q = query.trim().toLowerCase();
-    return manuals.filter((m) => {
-      const matchesFilter = filter === "all" || m.status === filter;
+    return library.filter((m) => {
+      const matchesFilter =
+        filter === "all" || (filter === "pending" ? isPending(m) : m.status === filter);
       const matchesQuery =
         !q || m.title.toLowerCase().includes(q) || m.equipment.toLowerCase().includes(q);
       return matchesFilter && matchesQuery;
     });
-  }, [query, filter]);
+  }, [library, query, filter]);
 
   const askAssistant = (manual) => {
     navigate("/ghost", { state: { manualId: manual.id } });
   };
 
   const counts = useMemo(() => {
-    const map = { all: manuals.length };
-    for (const m of manuals) map[m.status] = (map[m.status] ?? 0) + 1;
+    const map = { all: library?.length ?? 0 };
+    for (const m of library ?? []) {
+      const key = isPending(m) ? "pending" : m.status;
+      map[key] = (map[key] ?? 0) + 1;
+    }
     return map;
-  }, []);
+  }, [library]);
 
   return (
     <div className="p-6 space-y-6 max-w-7xl">
@@ -70,10 +99,17 @@ export default function Manuals() {
       </section>
 
       <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        {statsFor(manuals).map((s) => (
+        {statsFor(library ?? []).map((s) => (
           <StatCard key={s.title} {...s} />
         ))}
       </section>
+
+      {loadError && (
+        <p className="text-xs text-warn bg-warn-soft border border-warn/20 rounded-lg px-4 py-2.5">
+          {loadError} Showing the sample library instead — generated manuals appear here once
+          the backend is reachable.
+        </p>
+      )}
 
       <section className="flex flex-col sm:flex-row sm:items-center gap-3">
         <div className="relative flex-1 max-w-sm">
@@ -104,11 +140,28 @@ export default function Manuals() {
         </div>
       </section>
 
-      {visible.length > 0 ? (
+      {loading ? (
+        <section className="bg-surface border border-line rounded-lg p-10 text-center text-sm text-text-subtle">
+          Loading manuals...
+        </section>
+      ) : visible.length > 0 ? (
         <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {visible.map((manual) => (
             <ManualCard key={manual.id} manual={manual} onView={setSelected} onAsk={askAssistant} />
           ))}
+        </section>
+      ) : library.length === 0 ? (
+        <section className="bg-surface border border-line rounded-lg p-10 text-center">
+          <h2 className="font-display text-lg font-semibold">No generated manuals yet</h2>
+          <p className="text-text-muted text-sm mt-1">
+            Upload a technician recording and run the analysis to build the library.
+          </p>
+          <Link
+            to="/upload"
+            className="inline-block mt-4 bg-text text-white px-4 py-2 rounded-lg text-sm hover:bg-neutral-800 transition-colors"
+          >
+            Go to Upload
+          </Link>
         </section>
       ) : (
         <section className="bg-surface border border-line rounded-lg p-10 text-center">
